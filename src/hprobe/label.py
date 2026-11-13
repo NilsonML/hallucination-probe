@@ -57,11 +57,12 @@ def main() -> None:
 
     if args.check:
         m = pd.read_csv(run / "manual_check.csv")
-        m["human"] = m["human"].astype(str).str.strip().replace("", float("nan"))
+        m["human"] = pd.to_numeric(m["human"].astype(str).str.strip(), errors="coerce")
         m = m.dropna(subset=["human"])
-        agree = (m["human"].astype(int) == m["correct"]).mean()
+        m["human"] = m["human"].astype(int)
+        agree = (m["human"] == m["correct"]).mean()
         print(f"Проверено вручную: {len(m)}, совпадение с автоматической разметкой: {agree:.1%}")
-        print(m[m["human"].astype(int) != m["correct"]][["question", "answer", "gold", "correct", "human"]]
+        print(m[m["human"] != m["correct"]][["question", "answer", "gold", "correct", "human"]]
               .to_string(max_colwidth=50))
         return
 

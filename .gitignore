@@ -5,3 +5,8 @@ outputs/
 *.npy
 .ipynb_checkpoints/
 data/
+.pytest_cache/
+.vscode/
+*.docx
+*.bak
+.DS_Store

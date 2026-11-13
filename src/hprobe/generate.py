@@ -71,6 +71,7 @@ def _token_stats(scores: tuple[torch.Tensor, ...], seqs: torch.Tensor, eos_ids: 
 def run_batch(tok, model, prompts: list[str], n_samples: int, max_new_tokens: int,
               temperature: float, top_p: float):
     enc = tok(prompts, return_tensors="pt", padding=True).to(model.device)
+    enc.pop("token_type_ids", None)  # Qwen2 не использует token_type_ids; tiny-модель падает иначе
     prompt_len = enc["input_ids"].shape[1]
     cfg_eos = model.generation_config.eos_token_id
     eos_ids = set(cfg_eos if isinstance(cfg_eos, list) else [cfg_eos])

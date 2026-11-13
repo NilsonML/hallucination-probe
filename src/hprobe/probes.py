@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 C_GRID = (0.001, 0.01, 0.1, 1.0)
@@ -47,7 +47,7 @@ def fit_probe(x_tr, y_tr, x_val, y_val, c_grid=C_GRID):
     """Логистическая регрессия; C выбирается по ROC-AUC на val."""
     best = None
     for c in c_grid:
-        clf = make_pipeline(StandardScaler(), LogisticRegression(C=c, max_iter=2000))
+        clf = Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(C=c, max_iter=2000))])
         clf.fit(x_tr, y_tr)
         auc = roc_auc_score(y_val, clf.predict_proba(x_val)[:, 1])
         if best is None or auc > best[0]:

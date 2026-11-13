@@ -1,0 +1,9 @@
+numpy
+pandas
+scikit-learn
+torch
+transformers>=4.45
+matplotlib
+tqdm
+snowballstemmer
+pytest

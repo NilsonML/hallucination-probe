@@ -71,6 +71,7 @@ def test_generate_and_label(tmp_path):
     tok, model = load_model(str(model_dir), "fp32", "cpu")
     r = records[5]
     enc = tok([build_prompt(tok, r["question"], "ru")], return_tensors="pt")
+    enc.pop("token_type_ids", None)
     with torch.no_grad():
         hs = model(**enc, output_hidden_states=True).hidden_states
     single = torch.stack([h[0, -1] for h in hs]).numpy()

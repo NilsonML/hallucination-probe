@@ -1,0 +1,14 @@
+model,direction,probe_auc,probe_layer,best_baseline,baseline_auc,test_error_rate,experiment,lang,target_domain
+0.5b,ru→en,0.657,19,Самосогласованность (5 сэмплов),0.816,0.721,cross-lingual,,
+0.5b,en→ru,0.744,18,Средняя энтропия,0.778,0.894,cross-lingual,,
+1.5b,ru→en,0.784,23,Средняя энтропия,0.865,0.606,cross-lingual,,
+1.5b,en→ru,0.767,19,Средняя энтропия,0.871,0.802,cross-lingual,,
+3b,ru→en,0.776,31,Средняя энтропия,0.82,0.526,cross-lingual,,
+3b,en→ru,0.79,29,Средняя энтропия,0.833,0.672,cross-lingual,,
+3b,,0.892,31,Минимальный log p токена,0.765,0.857,cross-domain,ru,culture
+3b,,0.81,29,Средняя энтропия,0.818,0.628,cross-domain,ru,geography
+3b,,0.939,21,Средняя энтропия,0.79,0.521,cross-domain,ru,history
+3b,,0.81,26,Самосогласованность (5 сэмплов),0.893,0.689,cross-domain,ru,other
+3b,,0.922,14,Средняя энтропия,0.9,0.787,cross-domain,ru,people
+3b,,1.0,25,Самосогласованность (5 сэмплов),1.0,0.667,cross-domain,ru,science
+3b,,0.778,28,Средний log p токенов,0.963,0.25,cross-domain,ru,sport

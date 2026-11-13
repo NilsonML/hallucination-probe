@@ -1,5 +1,5 @@
 torch>=2.2
-transformers>=4.45
+transformers>=4.45,<5
 accelerate>=0.30
 numpy
 pandas

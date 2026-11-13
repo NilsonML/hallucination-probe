@@ -1,8 +1,8 @@
 """Адаптивный поиск (В5): модель обращается к Википедии только при высоком риске ошибки.
 
     python -m hprobe.search \
-        --run outputs/qwen2.5-1.5b/ru \
-        --model Qwen/Qwen2.5-1.5B-Instruct \
+        --run outputs/qwen2.5-3b/ru \
+        --model Qwen/Qwen2.5-3B-Instruct \
         --questions data/questions.jsonl \
         --raw data/raw
 
@@ -12,7 +12,11 @@
 - fraction       доля вопросов, для которых включён поиск
 - accuracy       точность при данном пороге
 - searched_acc   точность на вопросах с поиском
-- baseline_acc   точность без поиска (threshold = 1.0)
+- n_searched     число вопросов с поиском
+- n_total        общее число вопросов
+
+Каждая строка curve.csv дописывается сразу после подсчёта порога — при обрыве
+прогон можно продолжить той же командой: уже посчитанные пороги пропускаются.
 """
 from __future__ import annotations
 
@@ -110,10 +114,13 @@ def compute_curve(
 
 def regenerate_batch(
     tok, model, to_fix: list[dict], paragraph_map: dict[str, str],
-    questions: dict[int, dict], lang: str, max_new_tokens: int
+    questions: dict[int, dict], lang: str, max_new_tokens: int, batch_size: int = 8
 ) -> list[dict]:
-    """Перегенерирует ответы с добавлением абзацев RuBQ."""
+    """Перегенерирует ответы с добавлением абзацев RuBQ пакетами."""
     from .generate import clean_answer
+
+    if not to_fix:
+        return []
 
     prompts = []
     for r in to_fix:
@@ -125,14 +132,61 @@ def regenerate_batch(
         prompts.append(build_search_prompt(tok, q[f"question_{lang}"], paragraphs, lang))
 
     out = []
-    for r, prompt in tqdm(zip(to_fix, prompts), total=len(to_fix), desc="search", leave=False):
-        enc = tok(prompt, return_tensors="pt", padding=False).to(model.device)
+    for start in tqdm(range(0, len(to_fix), batch_size), desc="search batches", leave=False):
+        batch = to_fix[start: start + batch_size]
+        batch_prompts = prompts[start: start + batch_size]
+        enc = tok(batch_prompts, return_tensors="pt", padding=True).to(model.device)
+        enc.pop("token_type_ids", None)
         with torch.no_grad():
-            gen = model.generate(**enc, do_sample=False, max_new_tokens=max_new_tokens,
-                                 pad_token_id=tok.pad_token_id)
-        text = tok.decode(gen[0, enc["input_ids"].shape[1]:], skip_special_tokens=True)
-        out.append({"uid": r["uid"], "answer": clean_answer(text)})
+            gen = model.generate(
+                **enc, do_sample=False, max_new_tokens=max_new_tokens,
+                pad_token_id=tok.pad_token_id)
+        texts = tok.batch_decode(gen[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)
+        for r, t in zip(batch, texts):
+            out.append({"uid": r["uid"], "answer": clean_answer(t)})
     return out
+
+
+def _row_for_threshold(
+    records: list[dict],
+    labels: pd.DataFrame,
+    risk: np.ndarray,
+    thr: float,
+    regenerate_fn,
+) -> dict:
+    """Одна строка кривой для заданного порога."""
+    uids = [r["uid"] for r in records]
+    uid2record = {r["uid"]: r for r in records}
+    uid2label = dict(zip(labels["uid"].tolist(), labels.to_dict("records")))
+
+    mask = risk >= thr
+    to_fix = [records[i] for i in range(len(records)) if mask[i]]
+    fixed = {item["uid"]: item for item in regenerate_fn(to_fix)} if to_fix else {}
+
+    correct = total = searched_correct = searched_total = 0
+    for i, uid in enumerate(uids):
+        label = uid2label.get(uid)
+        if label is None:
+            continue
+        total += 1
+        if mask[i] and uid in fixed:
+            answer = fixed[uid]["answer"]
+            searched_total += 1
+        else:
+            answer = uid2record[uid]["answer"]
+        if is_correct(answer, label["gold"].split(" | "), label["kind"]):
+            correct += 1
+            if mask[i] and uid in fixed:
+                searched_correct += 1
+
+    return {
+        "threshold": thr,
+        "fraction": searched_total / total if total else 0.0,
+        "accuracy": correct / total if total else 0.0,
+        "searched_acc": searched_correct / searched_total if searched_total else float("nan"),
+        "n_searched": searched_total,
+        "n_total": total,
+    }
 
 
 def main() -> None:
@@ -143,6 +197,7 @@ def main() -> None:
     ap.add_argument("--raw", default="data/raw")
     ap.add_argument("--lang", choices=["ru", "en"], default=None)
     ap.add_argument("--max-new-tokens", type=int, default=24)
+    ap.add_argument("--batch-size", type=int, default=16, help="размер батча для перегенерации")
     ap.add_argument("--thresholds", type=float, nargs="+", default=None,
                     help="пороги риска (по умолчанию 0.0, 0.05, ..., 0.95)")
     args = ap.parse_args()
@@ -150,6 +205,7 @@ def main() -> None:
     run = Path(args.run)
     out = run / "search"
     out.mkdir(exist_ok=True)
+    curve_path = out / "curve.csv"
 
     meta = json.loads((run / "meta.json").read_text(encoding="utf-8")) if (run / "meta.json").exists() else {}
     lang = args.lang or meta.get("lang", "ru")
@@ -168,14 +224,37 @@ def main() -> None:
     risk = probe_risk(probe, hidden)
 
     thresholds = args.thresholds if args.thresholds is not None else list(np.arange(0.0, 1.0, 0.05))
+    thresholds = sorted(set(thresholds), reverse=True)
+
+    # Resume: skip thresholds already in curve.csv
+    done = set()
+    if curve_path.exists():
+        done = set(pd.read_csv(curve_path)["threshold"].tolist())
+        print(f"Уже посчитано порогов: {len(done)}")
+    thresholds = [t for t in thresholds if t not in done]
+    if not thresholds:
+        print("Все пороги уже посчитаны.")
 
     tok, model = load_model(args.model)
 
     def regenerate_fn(to_fix):
-        return regenerate_batch(tok, model, to_fix, paragraph_map, questions, lang, args.max_new_tokens)
+        return regenerate_batch(
+            tok, model, to_fix, paragraph_map, questions, lang,
+            args.max_new_tokens, args.batch_size)
 
-    curve = compute_curve(records, labels, risk, paragraph_map, thresholds, regenerate_fn, lang)
-    curve.to_csv(out / "curve.csv", index=False)
+    # Append each row immediately to survive interruptions
+    file_exists = curve_path.exists()
+    with curve_path.open("a", encoding="utf-8") as f:
+        for thr in tqdm(thresholds, desc="thresholds"):
+            row = _row_for_threshold(records, labels, risk, thr, regenerate_fn)
+            row_df = pd.DataFrame([row])
+            row_df.to_csv(f, index=False, header=not file_exists)
+            file_exists = True
+            f.flush()
+
+    # Read full curve, sort and plot
+    curve = pd.read_csv(curve_path).sort_values("threshold", ascending=False)
+    curve.to_csv(curve_path, index=False)
     plot_curve(curve, out / "curve.png", run.name)
     print(curve.round(3).to_string(index=False))
 
