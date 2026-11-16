@@ -153,15 +153,18 @@ def _row_for_threshold(
     risk: np.ndarray,
     thr: float,
     regenerate_fn,
+    cache: dict[str, dict],
 ) -> dict:
-    """Одна строка кривой для заданного порога."""
+    """Одна строка кривой для заданного порога с кэшированием перегенераций."""
     uids = [r["uid"] for r in records]
     uid2record = {r["uid"]: r for r in records}
     uid2label = dict(zip(labels["uid"].tolist(), labels.to_dict("records")))
 
     mask = risk >= thr
-    to_fix = [records[i] for i in range(len(records)) if mask[i]]
-    fixed = {item["uid"]: item for item in regenerate_fn(to_fix)} if to_fix else {}
+    to_fix = [records[i] for i in range(len(records)) if mask[i] and records[i]["uid"] not in cache]
+    if to_fix:
+        for item in regenerate_fn(to_fix):
+            cache[item["uid"]] = item
 
     correct = total = searched_correct = searched_total = 0
     for i, uid in enumerate(uids):
@@ -169,14 +172,14 @@ def _row_for_threshold(
         if label is None:
             continue
         total += 1
-        if mask[i] and uid in fixed:
-            answer = fixed[uid]["answer"]
+        if mask[i] and uid in cache:
+            answer = cache[uid]["answer"]
             searched_total += 1
         else:
             answer = uid2record[uid]["answer"]
         if is_correct(answer, label["gold"].split(" | "), label["kind"]):
             correct += 1
-            if mask[i] and uid in fixed:
+            if mask[i] and uid in cache:
                 searched_correct += 1
 
     return {
@@ -200,6 +203,8 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=16, help="размер батча для перегенерации")
     ap.add_argument("--thresholds", type=float, nargs="+", default=None,
                     help="пороги риска (по умолчанию 0.0, 0.05, ..., 0.95)")
+    ap.add_argument("--split", choices=["train", "val", "test", "all"], default="test",
+                    help="на какой части разбиения строить кривую (по умолчанию test)")
     args = ap.parse_args()
 
     run = Path(args.run)
@@ -212,7 +217,18 @@ def main() -> None:
 
     records = [json.loads(l) for l in (run / "records.jsonl").open(encoding="utf-8")]
     labels = pd.read_csv(run / "labels.csv")
+
+    # Filter by split for faster and fair evaluation
+    if args.split != "all":
+        labels = labels[labels["split"] == args.split].reset_index(drop=True)
+
+    allowed_uids = set(labels["uid"].tolist())
+    records = [r for r in records if r["uid"] in allowed_uids]
+    records_index = {r["uid"]: i for i, r in enumerate(records)}
+    labels = labels[labels["uid"].isin(records_index)].reset_index(drop=True)
+
     hidden = np.load(run / "hidden.npy", mmap_mode="r")
+    hidden = np.asarray(hidden[[records_index[uid] for uid in labels["uid"].tolist()]], dtype=np.float32)
     probe = load_probe(run / "probe" / "probe.npz")
 
     questions = {}
@@ -242,11 +258,14 @@ def main() -> None:
             tok, model, to_fix, paragraph_map, questions, lang,
             args.max_new_tokens, args.batch_size)
 
+    # Cache regenerated answers across thresholds (poroges are processed high->low).
+    fixed_cache: dict[str, dict] = {}
+
     # Append each row immediately to survive interruptions
     file_exists = curve_path.exists()
     with curve_path.open("a", encoding="utf-8") as f:
         for thr in tqdm(thresholds, desc="thresholds"):
-            row = _row_for_threshold(records, labels, risk, thr, regenerate_fn)
+            row = _row_for_threshold(records, labels, risk, thr, regenerate_fn, fixed_cache)
             row_df = pd.DataFrame([row])
             row_df.to_csv(f, index=False, header=not file_exists)
             file_exists = True

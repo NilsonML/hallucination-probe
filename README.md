@@ -60,7 +60,7 @@ PYTHONPATH=src python -m pytest -q tests                 # проверки
 PYTHONPATH=src python -m hprobe.generate --model Qwen/Qwen2.5-1.5B-Instruct --lang ru --out outputs/qwen2.5-1.5b/ru
 PYTHONPATH=src python -m hprobe.label --run outputs/qwen2.5-1.5b/ru
 PYTHONPATH=src python -m hprobe.probes --run outputs/qwen2.5-1.5b/ru
-PYTHONPATH=src python -m hprobe.search --run outputs/qwen2.5-1.5b/ru --model Qwen/Qwen2.5-1.5B-Instruct
+PYTHONPATH=src python -m hprobe.search --run outputs/qwen2.5-1.5b/ru --model Qwen/Qwen2.5-1.5B-Instruct --split test
 ```
 
 Генерация требует GPU — используйте `notebooks/01_generate_local.ipynb` (запускается на локальной машине).
