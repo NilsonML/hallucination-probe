@@ -201,7 +201,7 @@ def main() -> None:
     ap.add_argument("--raw", default="data/raw")
     ap.add_argument("--lang", choices=["ru", "en"], default=None)
     ap.add_argument("--max-new-tokens", type=int, default=24)
-    ap.add_argument("--batch-size", type=int, default=16, help="размер батча для перегенерации")
+    ap.add_argument("--batch-size", type=int, default=1, help="размер батча для перегенерации (для 3B на 8GB GPU ставь 1)")
     ap.add_argument("--thresholds", type=float, nargs="+", default=None,
                     help="пороги риска (по умолчанию 0.0, 0.05, ..., 0.95)")
     ap.add_argument("--split", choices=["train", "val", "test", "all"], default="test",
