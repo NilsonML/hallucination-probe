@@ -140,7 +140,8 @@ def regenerate_batch(
         with torch.no_grad():
             gen = model.generate(
                 **enc, do_sample=False, max_new_tokens=max_new_tokens,
-                pad_token_id=tok.pad_token_id)
+                pad_token_id=tok.pad_token_id,
+                temperature=None, top_p=None, top_k=None)
         texts = tok.batch_decode(gen[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)
         for r, t in zip(batch, texts):
             out.append({"uid": r["uid"], "answer": clean_answer(t)})
